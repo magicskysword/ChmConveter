@@ -39,8 +39,8 @@ Thumbs.db
 desktop.ini
 
 # Project specific
-temp/
-temp*/
-output/
-output*/
+/temp/
+/temp*/
+/output/
+/output*/
 *.chm

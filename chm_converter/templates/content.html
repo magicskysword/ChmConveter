@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}}</title>
+    <link id="theme_link" rel="stylesheet" href="{{css_prefix}}lesson_light.css" type="text/css">
+    <link id="custom_theme_link" rel="stylesheet" href="{{css_prefix}}custom_lesson_light.css" type="text/css">
+</head>
+<body>
+    <div class="content-wrapper">
+        {{body_content}}
+    </div>
+    <script>
+        // 主题切换函数
+        function setTheme(theme) {
+            const cssPrefix = '{{css_prefix}}';
+            const themeLink = document.getElementById('theme_link');
+            const customThemeLink = document.getElementById('custom_theme_link');
+            
+            if (theme === 'dark') {
+                themeLink.href = cssPrefix + 'lesson_dark.css';
+                customThemeLink.href = cssPrefix + 'custom_lesson_dark.css';
+            } else {
+                themeLink.href = cssPrefix + 'lesson_light.css';
+                customThemeLink.href = cssPrefix + 'custom_lesson_light.css';
+            }
+        }
+        
+        // 监听父窗口的主题变化消息
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'themeChange') {
+                setTheme(e.data.theme);
+            }
+        });
+        
+        // 页面加载时，向父窗口请求当前主题
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({type: 'pageLoaded', title: '{{title_escaped}}'}, '*');
+            window.parent.postMessage({type: 'requestTheme'}, '*');
+        }
+    </script>
+</body>
+</html>
