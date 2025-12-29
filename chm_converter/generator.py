@@ -164,6 +164,60 @@ class StaticSiteGenerator:
         if self.verbose:
             print(message)
     
+    def _should_exclude_item(self, path: Path) -> bool:
+        """判断是否应该排除某个文件或目录
+        
+        Args:
+            path: 文件或目录路径
+            
+        Returns:
+            是否应该排除
+        """
+        name = path.name
+        return self._should_exclude_by_name(name)
+    
+    def _should_exclude_by_name(self, name: str) -> bool:
+        """根据名称判断是否应该排除
+        
+        Args:
+            name: 文件或目录名
+            
+        Returns:
+            是否应该排除
+        """
+        # CHM内部元数据文件和目录
+        if name.startswith('#') or name.startswith('$'):
+            return True
+        
+        # CHM项目文件
+        if name.lower().endswith(('.hhc', '.hhk', '.hhp')):
+            return True
+        
+        return False
+    
+    def _find_title_in_toc(self, toc: TocItem, local_path: str) -> Optional[str]:
+        """在目录树中查找文件的标题
+        
+        Args:
+            toc: 目录树根节点
+            local_path: 文件的相对路径
+            
+        Returns:
+            文件标题，如果未找到则返回None
+        """
+        def search(item: TocItem) -> Optional[str]:
+            if item.local and item.local == local_path:
+                return item.name
+            
+            for child in item.children:
+                result = search(child)
+                if result:
+                    return result
+            
+            return None
+        
+        return search(toc)
+    
     def _build_toc_from_files(self) -> TocItem:
         """从HTML文件构建目录树
         
@@ -230,36 +284,31 @@ class StaticSiteGenerator:
         self._write_file(assets_dir / 'app.js', 
                         self.template_manager.get_app_js())
         
-        # 复制原CHM的CSS文件到content目录
-        self._copy_source_css()
+        # 复制所有文件（使用黑名单机制）
+        self._copy_all_files()
         
-        # 复制图片目录和其他资源
-        self._copy_resources()
+        # 检测CSS主题
+        self._detect_css_themes()
     
-    def _copy_source_css(self):
-        """复制原CHM的CSS文件到content目录，并检测可用的CSS"""
+    def _detect_css_themes(self):
+        """检测可用的CSS主题文件"""
         content_dir = self.output_dir / 'content'
-        content_dir.mkdir(exist_ok=True)
         
         self.available_css = []
         light_css_found = False
         dark_css_found = False
         
-        # 检测并复制亮色主题CSS
+        # 检测亮色主题CSS
         for css_file in self.CSS_FILES_LIGHT:
-            src = self.extracted_dir / css_file
-            if src.exists():
-                dst = content_dir / css_file
-                shutil.copy2(src, dst)
+            css_path = content_dir / css_file
+            if css_path.exists():
                 self.available_css.append(css_file)
                 light_css_found = True
         
-        # 检测并复制暗色主题CSS
+        # 检测暗色主题CSS
         for css_file in self.CSS_FILES_DARK:
-            src = self.extracted_dir / css_file
-            if src.exists():
-                dst = content_dir / css_file
-                shutil.copy2(src, dst)
+            css_path = content_dir / css_file
+            if css_path.exists():
                 self.available_css.append(css_file)
                 dark_css_found = True
         
@@ -267,144 +316,106 @@ class StaticSiteGenerator:
         self.has_dark_theme = light_css_found and dark_css_found
         
         if self.available_css:
-            self._log(f"已复制 {len(self.available_css)} 个主题CSS文件到content目录")
+            self._log(f"检测到 {len(self.available_css)} 个主题CSS文件")
             if self.has_dark_theme:
-                self._log("检测到暗色主题CSS，启用主题切换功能")
+                self._log("启用主题切换功能")
             else:
-                self._log("未检测到完整的暗色主题CSS，禁用主题切换功能")
-        
-        # 复制CHM中的所有其他CSS文件（保持相对路径）
-        other_css_count = 0
-        for css_file in self.extracted_dir.rglob('*.css'):
-            try:
-                rel_path = css_file.relative_to(self.extracted_dir)
-            except ValueError:
-                continue
-            
-            # 跳过CHM内部目录
-            if any(part.startswith('#') or part.startswith('$') for part in rel_path.parts):
-                continue
-            
-            # 跳过已复制的主题CSS
-            if rel_path.name in self.CSS_FILES_LIGHT + self.CSS_FILES_DARK:
-                continue
-            
-            dst = content_dir / rel_path
-            if not dst.exists():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(css_file, dst)
-                other_css_count += 1
-        
-        if other_css_count > 0:
-            self._log(f"已复制 {other_css_count} 个其他CSS文件")
+                self._log("未检测到完整的暗色主题，禁用主题切换功能")
     
-    def _copy_resources(self):
-        """复制所有图片和资源文件
+    def _copy_all_files(self):
+        """使用黑名单机制复制所有文件
         
-        扫描解压目录中的所有图片文件和可能的资源目录，
-        保持相对路径结构复制到content目录
+        复制CHM解压目录中的所有文件和目录到content目录，
+        只排除CHM内部元数据文件（#*、$*等）
         """
         content_dir = self.output_dir / 'content'
         content_dir.mkdir(exist_ok=True)
         
-        # 图片扩展名
-        image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg', '.webp'}
-        
-        # 可能的资源目录名（不区分大小写）
-        resource_folder_patterns = {'images', 'images~', 'img', 'imgs', 'image', 'assets', 'res', 'resources', 'pics', 'pictures'}
-        
-        copied_folders = set()
+        copied_folders = 0
         copied_files = 0
         
-        # 1. 先复制资源目录（保持目录结构）
+        # 遍历解压目录中的所有项
         for item in self.extracted_dir.iterdir():
-            if item.is_dir():
-                folder_lower = item.name.lower()
-                if folder_lower in resource_folder_patterns or folder_lower.startswith('image'):
-                    dst_folder = content_dir / item.name
-                    try:
-                        if dst_folder.exists():
-                            shutil.rmtree(dst_folder, ignore_errors=True)
-                        shutil.copytree(item, dst_folder, dirs_exist_ok=True)
-                        copied_folders.add(item.name)
-                        self._log(f"已复制资源文件夹: {item.name}")
-                    except Exception as e:
-                        self._log(f"警告: 复制资源文件夹时出错: {e}")
-        
-        # 2. 扫描所有子目录中的图片文件（不在已复制的资源目录中）
-        for img_file in self.extracted_dir.rglob('*'):
-            if not img_file.is_file():
+            # 检查是否应该排除
+            if self._should_exclude_item(item):
                 continue
             
-            if img_file.suffix.lower() not in image_extensions:
+            dst_item = content_dir / item.name
+            
+            if item.is_dir():
+                # 复制整个目录
+                try:
+                    if dst_item.exists():
+                        shutil.rmtree(dst_item, ignore_errors=True)
+                    shutil.copytree(item, dst_item, 
+                                  ignore=lambda src, names: [n for n in names if self._should_exclude_by_name(n)],
+                                  dirs_exist_ok=True)
+                    copied_folders += 1
+                    self._log(f"已复制目录: {item.name}")
+                except Exception as e:
+                    self._log(f"警告: 复制目录时出错 {item.name}: {e}")
+            
+            elif item.is_file():
+                # 复制文件
+                try:
+                    shutil.copy2(item, dst_item)
+                    copied_files += 1
+                except Exception as e:
+                    self._log(f"警告: 复制文件时出错 {item.name}: {e}")
+        
+        self._log(f"已复制 {copied_folders} 个目录和 {copied_files} 个文件")
+    
+    def _copy_content_files(self, toc: TocItem):
+        """处理HTML内容文件并构建搜索索引
+        
+        Args:
+            toc: 目录树
+        
+        注意：文件已经在_copy_all_files中复制完成，
+        这里只需要处理HTML文件和构建搜索索引
+        """
+        content_dir = self.output_dir / 'content'
+        
+        # 扫描所有已复制的HTML文件并处理
+        processed_count = 0
+        for html_file in content_dir.rglob('*'):
+            if not html_file.is_file():
+                continue
+            
+            if html_file.suffix.lower() not in ['.html', '.htm']:
                 continue
             
             # 计算相对路径
             try:
-                rel_path = img_file.relative_to(self.extracted_dir)
+                rel_path = html_file.relative_to(content_dir)
             except ValueError:
                 continue
             
-            # 跳过已复制的资源目录中的文件
-            if rel_path.parts and rel_path.parts[0] in copied_folders:
-                continue
-            
-            # 跳过CHM内部目录
-            if any(part.startswith('#') or part.startswith('$') for part in rel_path.parts):
-                continue
-            
-            # 复制图片文件
-            dst_file = content_dir / rel_path
-            if not dst_file.exists():
-                try:
-                    dst_file.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(img_file, dst_file)
-                    copied_files += 1
-                except Exception as e:
-                    self._log(f"警告: 复制图片文件时出错 {rel_path}: {e}")
-        
-        if copied_files > 0:
-            self._log(f"已复制 {copied_files} 个散落的图片文件")
-    
-    def _copy_content_files(self, toc: TocItem):
-        """复制并处理内容文件
-        
-        Args:
-            toc: 目录树
-        """
-        content_dir = self.output_dir / 'content'
-        content_dir.mkdir(exist_ok=True)
-        
-        # 获取所有文件
-        all_files = toc.get_all_files()
-        
-        for item in all_files:
-            if not item.local:
-                continue
-            
-            src = self.extracted_dir / item.local
+            # 获取源文件（用于重新读取和处理）
+            src = self.extracted_dir / rel_path
             if not src.exists():
                 continue
             
-            # 目标路径
-            dst = content_dir / item.local
-            dst.parent.mkdir(parents=True, exist_ok=True)
+            # 从toc中查找标题
+            title = self._find_title_in_toc(toc, str(rel_path).replace('\\', '/'))
+            if not title:
+                title = html_file.stem
             
-            # 处理HTML文件
-            if src.suffix.lower() in ['.html', '.htm']:
-                self._process_html_file(src, dst, item.name)
-                
-                # 添加到搜索索引
-                text_content = self._extract_text(src)
-                if text_content:
-                    self.search_index.append({
-                        'title': item.name,
-                        'path': f'content/{item.local}',
-                        'content': text_content[:self.search_content_max_length]
-                    })
-            else:
-                # 直接复制其他文件
-                shutil.copy2(src, dst)
+            # 处理HTML文件（会覆盖已复制的文件，添加导航等）
+            self._process_html_file(src, html_file, title)
+            processed_count += 1
+            
+            # 添加到搜索索引
+            text_content = self._extract_text(src)
+            if text_content:
+                self.search_index.append({
+                    'title': title,
+                    'path': f'content/{rel_path.as_posix()}',
+                    'content': text_content[:self.search_content_max_length]
+                })
+        
+        self._log(f"已处理 {processed_count} 个HTML文件")
+
     
     def _process_html_file(self, src: Path, dst: Path, title: str):
         """处理HTML文件
