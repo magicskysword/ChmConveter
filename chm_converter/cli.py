@@ -39,6 +39,13 @@ def main():
     )
     
     parser.add_argument(
+        '-t', '--title',
+        type=str,
+        default=None,
+        help='自定义网站标题（默认从CHM文件提取）'
+    )
+    
+    parser.add_argument(
         '-q', '--quiet',
         action='store_true',
         help='安静模式，减少输出'
@@ -64,7 +71,8 @@ def main():
     # 创建生成器并执行
     generator = StaticSiteGenerator(
         chm_path=str(chm_path),
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        custom_title=args.title
     )
     
     generator.verbose = not args.quiet

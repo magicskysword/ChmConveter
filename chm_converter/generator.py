@@ -52,15 +52,18 @@ class StaticSiteGenerator:
         '*.hhp',
     ]
     
-    def __init__(self, chm_path: str, output_dir: str):
+    def __init__(self, chm_path: str, output_dir: str, verbose: bool = True, custom_title: Optional[str] = None):
         """初始化生成器
         
         Args:
             chm_path: CHM文件路径
             output_dir: 输出目录路径
+            verbose: 是否显示详细信息
+            custom_title: 自定义标题（优先级最高）
         """
         self.chm_path = Path(chm_path)
         self.output_dir = Path(output_dir)
+        self.custom_title = custom_title
         self.extractor = ChmExtractor(chm_path)
         self.template_manager = TemplateManager()
         self.search_index: List[Dict] = []
@@ -72,7 +75,7 @@ class StaticSiteGenerator:
         
         # 配置选项
         self.search_content_max_length = 500
-        self.verbose = True
+        self.verbose = verbose
     
     def generate(self) -> bool:
         """生成静态网站
@@ -99,9 +102,20 @@ class StaticSiteGenerator:
                 self._log(f"解析目录文件: {hhc_file.name}")
                 toc = parse_hhc_file(hhc_file)
             
-            # 获取文档标题
-            title = extract_title_from_hhc(toc)
-            self._log(f"文档标题: {title}")
+            # 获取文档标题（优先级：自定义 > CHM标题 > .hhc提取）
+            if self.custom_title:
+                title = self.custom_title
+                self._log(f"使用自定义标题: {title}")
+            else:
+                # 尝试从CHM的.hhp文件提取标题
+                chm_title = self.extractor.get_chm_title()
+                if chm_title:
+                    title = chm_title
+                    self._log(f"从CHM提取标题: {title}")
+                else:
+                    # 回退到从.hhc目录结构提取
+                    title = extract_title_from_hhc(toc)
+                    self._log(f"从目录结构提取标题: {title}")
             
             # 统计
             counts = toc.count_items()
@@ -465,6 +479,28 @@ class StaticSiteGenerator:
                     elem.decompose()
                 for elem in body.find_all('div', id='popup_panel'):
                     elem.decompose()
+                
+                # 修复CSS table布局：为display:table-row的div添加table容器
+                divs_to_wrap = []
+                for div in body.find_all('div'):
+                    style = div.get('style', '')
+                    if style and ('display: table-row' in style.lower() or 'display:table-row' in style.lower()):
+                        # 检查父元素是否已经是table
+                        parent = div.parent
+                        if parent and parent.name == 'body':
+                            # 直接在body下的table-row需要包裹
+                            divs_to_wrap.append(div)
+                        elif parent and parent.name == 'div':
+                            parent_style = parent.get('style', '')
+                            if not (parent_style and ('display: table' in parent_style.lower() or 'display:table' in parent_style.lower())):
+                                # 父div不是table，需要包裹
+                                divs_to_wrap.append(div)
+                
+                # 执行包裹操作
+                for div in divs_to_wrap:
+                    wrapper = soup.new_tag('div', style='display: table')
+                    div.insert_before(wrapper)
+                    wrapper.append(div.extract())
                 
                 # 获取内容
                 body_content = ''.join(str(child) for child in body.children)

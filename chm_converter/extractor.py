@@ -200,6 +200,56 @@ class ChmExtractor:
         
         return None
     
+    def find_hhp_file(self) -> Optional[Path]:
+        """查找.hhp项目文件
+        
+        Returns:
+            .hhp文件路径
+        """
+        if not self._extracted_dir:
+            return None
+        
+        for f in self._extracted_dir.glob('*.hhp'):
+            return f
+        
+        return None
+    
+    def get_chm_title(self) -> Optional[str]:
+        """从.hhp文件提取CHM标题
+        
+        Returns:
+            CHM标题，如果未找到则返回None
+        """
+        hhp_file = self.find_hhp_file()
+        if not hhp_file:
+            return None
+        
+        # 尝试多种编码读取.hhp文件
+        encodings = ['gb18030', 'gbk', 'utf-8', 'gb2312', 'cp936']
+        content = None
+        
+        for encoding in encodings:
+            try:
+                with open(hhp_file, 'r', encoding=encoding) as f:
+                    content = f.read()
+                break
+            except UnicodeDecodeError:
+                continue
+        
+        if not content:
+            return None
+        
+        # 从[OPTIONS]部分提取Title
+        # .hhp文件格式示例：
+        # [OPTIONS]
+        # Title=文档标题
+        import re
+        match = re.search(r'^Title\s*=\s*(.+?)\s*$', content, re.MULTILINE | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        
+        return None
+    
     def list_html_files(self) -> List[Path]:
         """列出所有HTML文件
         
