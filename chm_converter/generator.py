@@ -409,9 +409,10 @@ class StaticSiteGenerator:
             
             soup = BeautifulSoup(content, 'html.parser')
             
-            # 提取原始的样式信息
+            # 提取原始的样式和脚本信息
             original_styles = ""
             original_css_links = ""
+            original_scripts = ""
             
             head = soup.find('head')
             if head:
@@ -424,6 +425,11 @@ class StaticSiteGenerator:
                 link_tags = head.find_all('link', rel='stylesheet')
                 if link_tags:
                     original_css_links = '\n    '.join(str(tag) for tag in link_tags)
+            
+            # 提取所有<script>标签（包括head和body中的）
+            script_tags = soup.find_all('script')
+            if script_tags:
+                original_scripts = '\n    '.join(str(tag) for tag in script_tags)
             
             # 提取body内容
             body = soup.find('body')
@@ -468,11 +474,11 @@ class StaticSiteGenerator:
             depth = len(rel_path.parts) - 1
             css_prefix = '../' * depth if depth > 0 else './'
             
-            # 创建新的HTML，传递可用的CSS信息和原始样式
+            # 创建新的HTML，传递可用的CSS信息、原始样式和脚本
             new_html = self.template_manager.get_content_html(
                 title, body_content, css_prefix, 
                 self.available_css, self.has_dark_theme,
-                original_styles, original_css_links)
+                original_styles, original_css_links, original_scripts)
             
             with open(dst, 'w', encoding='utf-8') as f:
                 f.write(new_html)

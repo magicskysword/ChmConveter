@@ -94,7 +94,8 @@ class TemplateManager:
     
     def get_content_html(self, title: str, body_content: str, css_prefix: str,
                          available_css: list = None, has_dark_theme: bool = True,
-                         original_styles: str = "", original_css_links: str = "") -> str:
+                         original_styles: str = "", original_css_links: str = "",
+                         original_scripts: str = "") -> str:
         """获取渲染后的内容页面HTML
         
         Args:
@@ -105,6 +106,7 @@ class TemplateManager:
             has_dark_theme: 是否有暗色主题
             original_styles: 原始HTML中的<style>标签内容
             original_css_links: 原始HTML中的<link>CSS引用
+            original_scripts: 原始HTML中的<script>标签内容
             
         Returns:
             渲染后的HTML内容
@@ -164,7 +166,8 @@ class TemplateManager:
             window.parent.postMessage({{type: 'requestTheme'}}, '*');
         }}'''
         else:
-            theme_script = f'''
+            # 如果没有原始脚本，才添加postMessage通知
+            theme_script = '' if original_scripts.strip() else f'''
         // 页面加载通知
         if (window.parent && window.parent !== window) {{
             window.parent.postMessage({{type: 'pageLoaded', title: '{html.escape(title).replace("'", "\\'")}'}}, '*');
@@ -181,6 +184,7 @@ class TemplateManager:
 </head>
 <body>
 {body_content}
+{original_scripts}
 <script>{theme_script}
 </script>
 </body>
