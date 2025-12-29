@@ -83,6 +83,9 @@ python main.py input.chm output/
 # 使用模块方式运行
 python -m chm_converter input.chm output/
 
+# 自定义网站标题
+python main.py input.chm output/ --title "我的帮助文档"
+
 # 安静模式（减少输出）
 python main.py input.chm output/ -q
 ```
@@ -97,6 +100,7 @@ python main.py input.chm output/ -q
   output_dir            输出目录路径
 
 选项:
+  -t, --title TITLE    自定义网站标题（默认从CHM文件提取）
   -q, --quiet          安静模式，减少输出信息
   -v, --version        显示版本信息
   -h, --help           显示帮助信息
